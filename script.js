@@ -13,7 +13,7 @@ const INSTRUCTIONS = {
 // type: "form"   … 正答 answer と ダミー dummies（2つ）の3択
 // type: "order"  … chunks（語群）を並べかえ（answer が正しい順番）。文頭チャンクは小文字で保存し表示時に大文字化
 // type: "blanks" … template の {} ごとに選択。verb: true の空欄は語群（VERB_CHOICES）から，それ以外は answer＋dummies の3択
-// ja: 問題文の日本語／状況，trans: 答え合わせ後に表示する訳，note: 不正解のときに表示する解説
+// ja: 問題文の日本語／状況，trans: 答え合わせ後に表示する訳，note: 答え合わせ後に表示する解説
 
 const QUESTIONS = [
     // ---- 1 ----
@@ -350,7 +350,7 @@ function onMain() {
   fb += `<p class="mark ${ok ? "ok" : "ng"}">${ok ? "○ 正解" : "× 不正解"}</p>`;
   fb += `<p class="answer">${esc(fullAnswer(q))}</p>`;
   if (q.trans) fb += `<p>${esc(q.trans)}</p>`;
-  if (!ok && q.note) fb += `<p class="note">${esc(q.note)}</p>`;
+  if (q.note) fb += `<p class="note">${esc(q.note)}</p>`;
   fb += `</div>`;
   document.getElementById("fb").innerHTML = fb;
 
