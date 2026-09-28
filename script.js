@@ -228,7 +228,8 @@ function displayChunk(q, text, isFirst) {
   return isFirst && !q.before ? cap(text) : text;
 }
 
-function isChecked(rec) { return rec.result === "correct" || rec.result === "wrong"; }
+// 答え合わせ済み、またはとばした問題は解答を確定（解説を表示）
+function isChecked(rec) { return !!rec.result; }
 
 // ---------- 画面：問題数の選択 ----------
 function renderHome() {
@@ -319,7 +320,7 @@ function renderQuestion() {
   }
   if (q.type === "order") renderOrder(q, rec, checked);
 
-  if (checked) renderFeedback(q, rec.result === "correct");
+  if (checked) renderFeedback(q, rec.result);
   else updateMain(q, rec);
 }
 
@@ -334,7 +335,7 @@ function renderOrder(q, rec, checked) {
   line.innerHTML = joinSentence([esc(q.before), chosen + slots, esc(q.after)]);
 
   poolEl.innerHTML = rec.pool.map((text, pi) =>
-    rec.picked.includes(pi) ? "" : `<button class="chunk" data-pi="${pi}">${esc(text)}</button>`
+    rec.picked.includes(pi) ? "" : `<button class="chunk" data-pi="${pi}" ${checked ? "disabled" : ""}>${esc(text)}</button>`
   ).join("");
 
   if (checked) return;
@@ -365,9 +366,14 @@ function judge(q, rec) {
   return rec.picked.map(pi => rec.pool[pi]).join(" ") === q.answer.join(" ");
 }
 
-function renderFeedback(q, ok) {
+function renderFeedback(q, result) {
+  const marks = {
+    correct: `<p class="mark ok">○ 正解</p>`,
+    wrong:   `<p class="mark ng">× 不正解</p>`,
+    skipped: `<p class="mark">とばした問題</p>`
+  };
   let fb = `<div class="feedback">`;
-  fb += `<p class="mark ${ok ? "ok" : "ng"}">${ok ? "○ 正解" : "× 不正解"}</p>`;
+  fb += marks[result];
   fb += `<p class="answer">${esc(fullAnswer(q))}</p>`;
   if (q.trans) fb += `<p>${esc(q.trans)}</p>`;
   if (q.note) fb += `<p class="note">${esc(q.note).replace(/\n/g, "<br>")}</p>`;
@@ -386,7 +392,8 @@ function onMain() {
 
 function onSkip() {
   records[pos].result = "skipped";
-  next();
+  renderQuestion();
+  document.getElementById("main").focus();
 }
 
 function next() {
@@ -399,7 +406,7 @@ function next() {
 function renderResult() {
   progressEl.textContent = "";
   const score = records.filter(r => r.result === "correct").length;
-  const skipped = records.filter(r => !isChecked(r)).length;
+  const skipped = records.filter(r => r.result === "skipped").length;
   const missed = queue.filter((_, i) => records[i].result !== "correct");
 
   let html = `<p class="result">${score} / ${queue.length} 問正解</p>`;
