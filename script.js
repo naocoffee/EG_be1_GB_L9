@@ -4,6 +4,9 @@
 
 const LESSON_TITLE = "Lesson 9　受動態";
 
+// 最初に選べる問題数（収録問題数を超える数は表示されない）
+const COUNT_OPTIONS = [10, 20, 30];
+
 const INSTRUCTIONS = {
   form:   "［ ］の動詞の適切な形を選びなさい。",
   order:  "日本語，または【状況】に合うように，語句を並べかえなさい。",
@@ -190,14 +193,9 @@ const VERB_CHOICES = ["made", "stolen", "discovered", "taken", "printed", "broug
 const app = document.getElementById("app");
 const progressEl = document.getElementById("progress");
 
-let queue = [];
+let queue = [];    // 出題する問題（QUESTIONS のインデックス）
+let records = [];  // 各問の解答状態 { result, choice, sels, picked, pool }
 let pos = 0;
-let score = 0;
-let wrong = [];
-let checked = false;
-let picked = [];    // order 用：選択済みチャンクの pool インデックス
-let pool = [];      // order 用：シャッフル後のチャンク
-let choice = null;  // form 用：選んだ選択肢
 
 function shuffle(arr) {
   const a = arr.slice();
@@ -211,7 +209,7 @@ function shuffle(arr) {
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
 function esc(s) {
-  return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
 function joinSentence(parts) {
@@ -230,23 +228,33 @@ function displayChunk(q, text, isFirst) {
   return isFirst && !q.before ? cap(text) : text;
 }
 
-function blankOptions(b) {
-  return b.verb ? VERB_CHOICES : shuffle([b.answer, ...b.dummies]);
+function isChecked(rec) { return rec.result === "correct" || rec.result === "wrong"; }
+
+// ---------- 画面：問題数の選択 ----------
+function renderHome() {
+  progressEl.textContent = "";
+  const counts = COUNT_OPTIONS.filter(n => n <= QUESTIONS.length);
+  let html = `<p class="ja">問題数を選んでください（全${QUESTIONS.length}問から出題）</p><div class="actions">`;
+  html += counts.map(n => `<button class="primary" data-n="${n}">${n}問</button>`).join("");
+  html += `</div>`;
+  app.innerHTML = html;
+  app.querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    start(shuffle(QUESTIONS.map((_, i) => i)).slice(0, Number(b.dataset.n)));
+  }));
 }
 
 function start(indices) {
   queue = shuffle(indices);
+  records = queue.map(() => ({}));
   pos = 0;
-  score = 0;
-  wrong = [];
   renderQuestion();
 }
 
+// ---------- 画面：問題 ----------
 function renderQuestion() {
-  checked = false;
-  picked = [];
-  choice = null;
   const q = QUESTIONS[queue[pos]];
+  const rec = records[pos];
+  const checked = isChecked(rec);
   progressEl.textContent = `${pos + 1} / ${queue.length}`;
 
   let html = `<p class="source">EXERCISES ${esc(q.src)}</p>`;
@@ -254,98 +262,110 @@ function renderQuestion() {
   if (q.ja) html += `<p class="ja">${esc(q.ja)}</p>`;
 
   if (q.type === "form") {
+    if (!rec.options) rec.options = shuffle([q.answer, ...q.dummies]);
     html += `<p class="hint">［ ${esc(q.verb)} ］</p>`;
-    html += `<p class="sentence">${esc(q.before)} <span class="slot" id="slot">&nbsp;</span> ${esc(q.after)}</p>`;
-    html += `<div class="pool" id="options">` +
-      shuffle([q.answer, ...q.dummies]).map(o => `<button class="chunk" data-v="${esc(o)}">${esc(o)}</button>`).join("") +
-      `</div>`;
+    html += `<p class="sentence">${esc(q.before)} <span class="slot">${rec.choice ? esc(rec.choice) : "&nbsp;"}</span> ${esc(q.after)}</p>`;
+    html += `<div class="pool" id="options">` + rec.options.map(o =>
+      `<button class="chunk${o === rec.choice ? " selected" : ""}" data-v="${esc(o)}" ${checked ? "disabled" : ""}>${esc(o)}</button>`
+    ).join("") + `</div>`;
   }
 
   if (q.type === "blanks") {
+    if (!rec.sels) rec.sels = q.blanks.map(() => "");
+    if (!rec.opts) rec.opts = q.blanks.map(b => b.verb ? VERB_CHOICES : shuffle([b.answer, ...b.dummies]));
     const atStart = q.template.startsWith("{}");
     let i = 0;
     const body = esc(q.template).replace(/\{\}/g, () => {
       const k = i++;
-      const opts = blankOptions(q.blanks[k])
-        .map(o => `<option value="${esc(o)}">${esc(k === 0 && atStart ? cap(o) : o)}</option>`).join("");
-      return `<select id="sel${k}"><option value="">―</option>${opts}</select>`;
+      const opts = rec.opts[k].map(o =>
+        `<option value="${esc(o)}" ${o === rec.sels[k] ? "selected" : ""}>${esc(k === 0 && atStart ? cap(o) : o)}</option>`
+      ).join("");
+      return `<select data-k="${k}" ${checked ? "disabled" : ""}><option value="">―</option>${opts}</select>`;
     });
     html += `<div class="verbs">${VERB_BOX}</div>`;
     html += `<p class="sentence">${body}</p>`;
   }
 
   if (q.type === "order") {
-    do { pool = shuffle(q.chunks); } while (pool.join(" ") === q.answer.join(" "));
+    if (!rec.pool) {
+      do { rec.pool = shuffle(q.chunks); } while (rec.pool.join(" ") === q.answer.join(" "));
+      rec.picked = [];
+    }
     html += `<p class="sentence" id="line"></p><div class="pool" id="pool"></div>`;
   }
 
-  html += `<div class="actions"><button class="primary" id="main" disabled>答え合わせ</button></div>`;
-  html += `<div id="fb"></div>`;
+  html += `<div class="actions">`;
+  html += `<button id="back" ${pos === 0 ? "disabled" : ""}>もどる</button>`;
+  if (!checked) html += `<button id="skip">とばす</button>`;
+  html += `<button class="primary" id="main">${checked ? (pos + 1 < queue.length ? "次へ" : "結果を見る") : "答え合わせ"}</button>`;
+  html += `</div><div id="fb"></div>`;
   app.innerHTML = html;
 
+  document.getElementById("back").addEventListener("click", () => { pos--; renderQuestion(); });
+  if (!checked) document.getElementById("skip").addEventListener("click", onSkip);
   document.getElementById("main").addEventListener("click", onMain);
 
-  if (q.type === "form") {
+  if (q.type === "form" && !checked) {
     app.querySelectorAll("#options button").forEach(b => b.addEventListener("click", () => {
-      if (checked) return;
-      choice = b.dataset.v;
-      app.querySelectorAll("#options button").forEach(x => x.classList.toggle("selected", x === b));
-      document.getElementById("slot").textContent = choice;
-      document.getElementById("main").disabled = false;
+      rec.choice = b.dataset.v;
+      renderQuestion();
     }));
   }
-  if (q.type === "blanks") {
-    const sels = app.querySelectorAll("select");
-    sels.forEach(el => el.addEventListener("change", () => {
-      document.getElementById("main").disabled = [...sels].some(x => !x.value);
+  if (q.type === "blanks" && !checked) {
+    app.querySelectorAll("select").forEach(el => el.addEventListener("change", () => {
+      rec.sels[Number(el.dataset.k)] = el.value;
+      updateMain(q, rec);
     }));
   }
-  if (q.type === "order") renderOrder(q);
+  if (q.type === "order") renderOrder(q, rec, checked);
+
+  if (checked) renderFeedback(q, rec.result === "correct");
+  else updateMain(q, rec);
 }
 
-function renderOrder(q) {
+function renderOrder(q, rec, checked) {
   const line = document.getElementById("line");
   const poolEl = document.getElementById("pool");
 
-  const chosen = picked.map((pi, k) =>
-    `<button class="chunk" data-k="${k}" ${checked ? "disabled" : ""}>${esc(displayChunk(q, pool[pi], k === 0))}</button>`
+  const chosen = rec.picked.map((pi, k) =>
+    `<button class="chunk" data-k="${k}" ${checked ? "disabled" : ""}>${esc(displayChunk(q, rec.pool[pi], k === 0))}</button>`
   ).join(" ");
-  const rest = pool.length - picked.length;
-  const slots = rest > 0 ? ` <span class="slot">&nbsp;</span>` : "";
+  const slots = rec.picked.length < rec.pool.length ? ` <span class="slot">&nbsp;</span>` : "";
   line.innerHTML = joinSentence([esc(q.before), chosen + slots, esc(q.after)]);
 
-  poolEl.innerHTML = pool.map((text, pi) =>
-    picked.includes(pi) ? "" : `<button class="chunk" data-pi="${pi}" ${checked ? "disabled" : ""}>${esc(text)}</button>`
+  poolEl.innerHTML = rec.pool.map((text, pi) =>
+    rec.picked.includes(pi) ? "" : `<button class="chunk" data-pi="${pi}">${esc(text)}</button>`
   ).join("");
 
+  if (checked) return;
   line.querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
-    picked.splice(Number(b.dataset.k), 1);
-    renderOrder(q);
+    rec.picked.splice(Number(b.dataset.k), 1);
+    renderOrder(q, rec, false);
   }));
   poolEl.querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
-    picked.push(Number(b.dataset.pi));
-    renderOrder(q);
+    rec.picked.push(Number(b.dataset.pi));
+    renderOrder(q, rec, false);
   }));
-
-  if (!checked) document.getElementById("main").disabled = picked.length !== pool.length;
+  updateMain(q, rec);
 }
 
-function judge(q) {
-  if (q.type === "form") return choice === q.answer;
-  if (q.type === "blanks") return q.blanks.every((b, i) => document.getElementById(`sel${i}`).value === b.answer);
-  return picked.map(pi => pool[pi]).join(" ") === q.answer.join(" ");
+function isReady(q, rec) {
+  if (q.type === "form") return !!rec.choice;
+  if (q.type === "blanks") return rec.sels.every(v => v);
+  return rec.picked.length === rec.pool.length;
 }
 
-function onMain() {
-  if (checked) { next(); return; }
-  const q = QUESTIONS[queue[pos]];
-  const ok = judge(q);
-  checked = true;
-  if (ok) score++; else wrong.push(queue[pos]);
+function updateMain(q, rec) {
+  document.getElementById("main").disabled = !isReady(q, rec);
+}
 
-  app.querySelectorAll("select, #options button").forEach(el => el.disabled = true);
-  if (q.type === "order") renderOrder(q);
+function judge(q, rec) {
+  if (q.type === "form") return rec.choice === q.answer;
+  if (q.type === "blanks") return q.blanks.every((b, i) => rec.sels[i] === b.answer);
+  return rec.picked.map(pi => rec.pool[pi]).join(" ") === q.answer.join(" ");
+}
 
+function renderFeedback(q, ok) {
   let fb = `<div class="feedback">`;
   fb += `<p class="mark ${ok ? "ok" : "ng"}">${ok ? "○ 正解" : "× 不正解"}</p>`;
   fb += `<p class="answer">${esc(fullAnswer(q))}</p>`;
@@ -353,11 +373,20 @@ function onMain() {
   if (q.note) fb += `<p class="note">${esc(q.note)}</p>`;
   fb += `</div>`;
   document.getElementById("fb").innerHTML = fb;
+}
 
-  const main = document.getElementById("main");
-  main.disabled = false;
-  main.textContent = pos + 1 < queue.length ? "次へ" : "結果を見る";
-  main.focus();
+function onMain() {
+  const q = QUESTIONS[queue[pos]];
+  const rec = records[pos];
+  if (isChecked(rec)) { next(); return; }
+  rec.result = judge(q, rec) ? "correct" : "wrong";
+  renderQuestion();
+  document.getElementById("main").focus();
+}
+
+function onSkip() {
+  records[pos].result = "skipped";
+  next();
 }
 
 function next() {
@@ -366,19 +395,23 @@ function next() {
   else renderResult();
 }
 
+// ---------- 画面：結果 ----------
 function renderResult() {
   progressEl.textContent = "";
-  let html = `<p class="result">${score} / ${queue.length} 問正解</p><div class="actions">`;
-  if (wrong.length) html += `<button class="primary" id="retryWrong">間違えた問題（${wrong.length}問）</button>`;
-  html += `<button id="retryAll">全問をもう一度</button></div>`;
+  const score = records.filter(r => r.result === "correct").length;
+  const skipped = records.filter(r => !isChecked(r)).length;
+  const missed = queue.filter((_, i) => records[i].result !== "correct");
+
+  let html = `<p class="result">${score} / ${queue.length} 問正解</p>`;
+  if (skipped) html += `<p class="ja">とばした問題：${skipped}問</p>`;
+  html += `<div class="actions">`;
+  if (missed.length) html += `<button class="primary" id="retryWrong">間違えた・とばした問題（${missed.length}問）</button>`;
+  html += `<button id="home">問題数を選び直す</button></div>`;
   app.innerHTML = html;
 
-  const missed = wrong.slice();
   if (missed.length) document.getElementById("retryWrong").addEventListener("click", () => start(missed));
-  document.getElementById("retryAll").addEventListener("click", startAll);
+  document.getElementById("home").addEventListener("click", renderHome);
 }
 
-function startAll() { start(QUESTIONS.map((_, i) => i)); }
-
 document.getElementById("title").textContent = LESSON_TITLE;
-startAll();
+renderHome();
