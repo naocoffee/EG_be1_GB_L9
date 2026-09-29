@@ -8,7 +8,7 @@ const LESSON_TITLE = "Lesson 9　受動態";
 const LESSON_ID = "Lesson 9";
 
 // 学習記録の送信先（Google Apps Script のウェブアプリ URL を "" の中に貼る）。空のままなら記録は送らない
-const LOG_URL = "";
+const LOG_URL = "https://script.google.com/macros/s/AKfycbzmgGcLSJc50ijxHDKUCTmUPB8dhkbjAKqpgby6tvqltto-PMfC2qTDAHjoYE36-NHI/exec";
 
 
 // 最初に選べる問題数（収録問題数を超える数は表示されない）
