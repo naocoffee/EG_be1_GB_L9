@@ -4,6 +4,13 @@
 
 const LESSON_TITLE = "Lesson 9　受動態";
 
+// 学習記録：スプレッドシートの「Lesson」列に記録する名前
+const LESSON_ID = "Lesson 9";
+
+// 学習記録の送信先（Google Apps Script のウェブアプリ URL を "" の中に貼る）。空のままなら記録は送らない
+const LOG_URL = "";
+
+
 // 最初に選べる問題数（収録問題数を超える数は表示されない）
 const COUNT_OPTIONS = [10, 20, 30];
 
@@ -13,7 +20,7 @@ const INSTRUCTIONS = {
   blanks: "日本語に合うように，（　）に入る語を選びなさい。動詞は枠内の語群から選ぶこと。"
 };
 
-// type: "form"   … 正答 answer と ダミー dummies（2つ）の3択
+// type: "form"   … 正答 answer と ダミー dummies（2つ）の3択（before / after の間に入る語句）
 // type: "order"  … chunks（語群）を並べかえ（answer が正しい順番）。文頭チャンクは小文字で保存し表示時に大文字化
 // type: "blanks" … template の {} ごとに選択。verb: true の空欄は語群（VERB_CHOICES）から，それ以外は answer＋dummies の3択
 // ja: 問題文の日本語／状況，trans: 答え合わせ後に表示する訳，note: 答え合わせ後に表示する解説
@@ -190,12 +197,55 @@ const VERB_CHOICES = ["made", "stolen", "discovered", "taken", "printed", "broug
 // ここから下はロジック（通常は編集不要）
 // =====================================================================
 
+// 旧形式（before / answer / after）の form 問題を template 形式にそろえる
+QUESTIONS.forEach(q => {
+  if (q.type === "form" && !q.template) {
+    q.template = [q.before, "{}", q.after].filter(Boolean).join(" ");
+    q.answer = [q.answer];
+    q.dummies = q.dummies.map(d => [d]);
+  }
+});
+
 const app = document.getElementById("app");
 const progressEl = document.getElementById("progress");
 
 let queue = [];    // 出題する問題（QUESTIONS のインデックス）
 let records = [];  // 各問の解答状態 { result, choice, sels, picked, pool }
 let pos = 0;
+let studentId = "";
+
+// ---------- 学籍番号の保存（この端末のブラウザに記憶） ----------
+function loadId() {
+  try { return localStorage.getItem("studentId") || ""; } catch (e) { return ""; }
+}
+function saveId(id) {
+  try { localStorage.setItem("studentId", id); } catch (e) {}
+}
+
+// ---------- 学習記録の送信 ----------
+const RESULT_LABELS = { correct: "正解", wrong: "不正解", skipped: "とばした" };
+
+function chosenText(q, rec) {
+  if (rec.result === "skipped") return "";
+  if (q.type === "form") return optionLabel(q, rec.options[rec.choice]);
+  if (q.type === "blanks") return rec.sels.join(" / ");
+  return rec.picked.map(pi => rec.pool[pi]).join(" ");
+}
+
+function sendLog(q, rec) {
+  if (!LOG_URL) return;
+  const body = JSON.stringify({
+    student: studentId,
+    lesson: LESSON_ID,
+    question: q.src,
+    result: RESULT_LABELS[rec.result],
+    choice: chosenText(q, rec)
+  });
+  try {
+    fetch(LOG_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body })
+      .catch(() => {});
+  } catch (e) {}
+}
 
 function shuffle(arr) {
   const a = arr.slice();
@@ -217,10 +267,22 @@ function joinSentence(parts) {
 }
 
 function fullAnswer(q) {
-  if (q.type === "form") return cap(joinSentence([q.before, q.answer, q.after]));
+  if (q.type === "form") return fillTemplate(q.template, q.answer);
   if (q.type === "order") return cap(joinSentence([q.before, ...q.answer, q.after]));
+  return fillTemplate(q.template, q.blanks.map(b => b.answer));
+}
+
+function fillTemplate(template, words) {
   let i = 0;
-  return cap(q.template.replace(/\{\}/g, () => q.blanks[i++].answer));
+  return cap(template.replace(/\{\}/g, () => words[i++]));
+}
+
+// 選択肢の表示：隣り合う空所はスペース，離れた空所は「…」でつなぐ
+function optionLabel(q, words) {
+  const parts = q.template.split("{}");
+  const atStart = q.template.startsWith("{}");
+  return words.map((w, k) => (k === 0 && atStart ? cap(w) : w) +
+    (k < words.length - 1 ? (parts[k + 1].trim() === "" ? " " : " … ") : "")).join("");
 }
 
 // 文頭にくる語句だけ大文字で表示
@@ -234,12 +296,27 @@ function isChecked(rec) { return !!rec.result; }
 // ---------- 画面：問題数の選択 ----------
 function renderHome() {
   progressEl.textContent = "";
-  const counts = COUNT_OPTIONS.filter(n => n <= QUESTIONS.length);
-  let html = `<p class="ja">問題数を選んでください（全${QUESTIONS.length}問から出題）</p><div class="actions">`;
-  html += counts.map(n => `<button class="primary" data-n="${n}">${n}問</button>`).join("");
+  const counts = [...new Set(COUNT_OPTIONS.map(n => Math.min(n, QUESTIONS.length)))];
+  let html = `<p class="ja">学籍番号（4桁）</p>`;
+  html += `<p><input type="text" id="sid" inputmode="numeric" maxlength="4" autocomplete="off" value="${esc(studentId || loadId())}"></p>`;
+  html += `<p class="ja">問題数を選んでください（全${QUESTIONS.length}問から出題）</p><div class="actions">`;
+  html += counts.map(n => `<button class="primary count" data-n="${n}">${n}問</button>`).join("");
   html += `</div>`;
   app.innerHTML = html;
-  app.querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+
+  const sid = document.getElementById("sid");
+  const buttons = app.querySelectorAll("button.count");
+  const update = () => {
+    sid.value = sid.value.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+                         .replace(/\D/g, "").slice(0, 4);
+    buttons.forEach(b => b.disabled = !/^\d{4}$/.test(sid.value));
+  };
+  sid.addEventListener("input", update);
+  update();
+
+  buttons.forEach(b => b.addEventListener("click", () => {
+    studentId = sid.value;
+    saveId(studentId);
     start(shuffle(QUESTIONS.map((_, i) => i)).slice(0, Number(b.dataset.n)));
   }));
 }
@@ -256,18 +333,25 @@ function renderQuestion() {
   const q = QUESTIONS[queue[pos]];
   const rec = records[pos];
   const checked = isChecked(rec);
-  progressEl.textContent = `${pos + 1} / ${queue.length}`;
+  progressEl.textContent = `${studentId}｜${pos + 1} / ${queue.length}`;
 
   let html = `<p class="source">EXERCISES ${esc(q.src)}</p>`;
-  html += `<p class="instruction">${INSTRUCTIONS[q.type]}</p>`;
+  html += `<p class="instruction">${INSTRUCTIONS[q.inst || q.type]}</p>`;
   if (q.ja) html += `<p class="ja">${esc(q.ja)}</p>`;
 
   if (q.type === "form") {
     if (!rec.options) rec.options = shuffle([q.answer, ...q.dummies]);
-    html += `<p class="hint">［ ${esc(q.verb)} ］</p>`;
-    html += `<p class="sentence">${esc(q.before)} <span class="slot">${rec.choice ? esc(rec.choice) : "&nbsp;"}</span> ${esc(q.after)}</p>`;
-    html += `<div class="pool" id="options">` + rec.options.map(o =>
-      `<button class="chunk${o === rec.choice ? " selected" : ""}" data-v="${esc(o)}" ${checked ? "disabled" : ""}>${esc(o)}</button>`
+    const fills = rec.choice === undefined ? null : rec.options[rec.choice];
+    const atStart = q.template.startsWith("{}");
+    let i = 0;
+    const body = esc(q.template).replace(/\{\}/g, () => {
+      const k = i++;
+      return `<span class="slot">${fills ? esc(k === 0 && atStart ? cap(fills[k]) : fills[k]) : "&nbsp;"}</span>`;
+    });
+    if (q.verb) html += `<p class="hint">［ ${esc(q.verb)} ］</p>`;
+    html += `<p class="sentence">${body}</p>`;
+    html += `<div class="pool" id="options">` + rec.options.map((o, oi) =>
+      `<button class="chunk${oi === rec.choice ? " selected" : ""}" data-i="${oi}" ${checked ? "disabled" : ""}>${esc(optionLabel(q, o))}</button>`
     ).join("") + `</div>`;
   }
 
@@ -283,7 +367,7 @@ function renderQuestion() {
       ).join("");
       return `<select data-k="${k}" ${checked ? "disabled" : ""}><option value="">―</option>${opts}</select>`;
     });
-    html += `<div class="verbs">${VERB_BOX}</div>`;
+    if (VERB_BOX) html += `<div class="verbs">${VERB_BOX}</div>`;
     html += `<p class="sentence">${body}</p>`;
   }
 
@@ -308,7 +392,7 @@ function renderQuestion() {
 
   if (q.type === "form" && !checked) {
     app.querySelectorAll("#options button").forEach(b => b.addEventListener("click", () => {
-      rec.choice = b.dataset.v;
+      rec.choice = Number(b.dataset.i);
       renderQuestion();
     }));
   }
@@ -351,7 +435,7 @@ function renderOrder(q, rec, checked) {
 }
 
 function isReady(q, rec) {
-  if (q.type === "form") return !!rec.choice;
+  if (q.type === "form") return rec.choice !== undefined;
   if (q.type === "blanks") return rec.sels.every(v => v);
   return rec.picked.length === rec.pool.length;
 }
@@ -361,7 +445,7 @@ function updateMain(q, rec) {
 }
 
 function judge(q, rec) {
-  if (q.type === "form") return rec.choice === q.answer;
+  if (q.type === "form") return rec.options[rec.choice].join(" ") === q.answer.join(" ");
   if (q.type === "blanks") return q.blanks.every((b, i) => rec.sels[i] === b.answer);
   return rec.picked.map(pi => rec.pool[pi]).join(" ") === q.answer.join(" ");
 }
@@ -386,12 +470,14 @@ function onMain() {
   const rec = records[pos];
   if (isChecked(rec)) { next(); return; }
   rec.result = judge(q, rec) ? "correct" : "wrong";
+  sendLog(q, rec);
   renderQuestion();
   document.getElementById("main").focus();
 }
 
 function onSkip() {
   records[pos].result = "skipped";
+  sendLog(QUESTIONS[queue[pos]], records[pos]);
   renderQuestion();
   document.getElementById("main").focus();
 }
