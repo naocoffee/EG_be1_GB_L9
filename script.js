@@ -14,49 +14,52 @@ const LOG_URL = "https://script.google.com/macros/s/AKfycbzmgGcLSJc50ijxHDKUCTmU
 // 最初に選べる問題数（収録問題数を超える数は表示されない）
 const COUNT_OPTIONS = [10, 20, 30];
 
+// 選択肢に表示するダミーの数（各問の dummies の中から，出題のたびにランダムに選ぶ）
+const DUMMY_COUNT = 2;
+
 const INSTRUCTIONS = {
   form:   "［ ］の動詞の適切な形を選びなさい。",
   order:  "日本語，または【状況】に合うように，語句を並べかえなさい。",
   blanks: "日本語に合うように，（　）に入る語を選びなさい。動詞は枠内の語群から選ぶこと。"
 };
 
-// type: "form"   … 正答 answer と ダミー dummies（2つ）の3択（before / after の間に入る語句）
+// type: "form"   … 正答 answer と ダミー dummies（候補を4つ。毎回2つをランダムに表示）の3択（before / after の間に入る語句）
 // type: "order"  … chunks（語群）を並べかえ（answer が正しい順番）。文頭チャンクは小文字で保存し表示時に大文字化
-// type: "blanks" … template の {} ごとに選択。verb: true の空欄は語群（VERB_CHOICES）から，それ以外は answer＋dummies の3択
+// type: "blanks" … template の {} ごとに選択。verb: true の空欄は語群（VERB_CHOICES）から，それ以外は answer＋dummies（候補4つから毎回2つ）の3択
 // ja: 問題文の日本語／状況，trans: 答え合わせ後に表示する訳，note: 答え合わせ後に表示する解説
 
 const QUESTIONS = [
     // ---- 1 ----
   { src: "1 ⑴ a", type: "form", verb: "clean", before: "I", after: "the room yesterday.",
-    answer: "cleaned", dummies: ["was cleaned", "is cleaned"],
+    answer: "cleaned", dummies: ["was cleaned", "is cleaned", "clean", "cleaning"],
     trans: "私は昨日部屋を掃除した。",
     note: "「私が部屋を掃除した」のように、主語（I）が自分で動作をする文を「能動態」という。yesterday（昨日）があるので過去の文。clean の過去形 cleaned を入れる。\nwas cleaned は「掃除された」という受動態なので、主語が I のこの文には合わない。" },
   { src: "1 ⑴ b", type: "form", verb: "clean", before: "The room", after: "yesterday.",
-    answer: "was cleaned", dummies: ["cleaned", "was cleaning"],
+    answer: "was cleaned", dummies: ["cleaned", "was cleaning", "is cleaned", "were cleaned"],
     trans: "部屋は昨日掃除された。",
     note: "主語の The room（部屋）は自分で掃除をしない。「部屋が掃除された」のように、主語が動作を受ける文を「受動態」という。受動態の形は〈be動詞＋過去分詞〉。yesterday があるので be動詞は過去形 was にする。\ncleaned だけだと「部屋が掃除をした」という意味になってしまう。" },
   { src: "1 ⑵ a", type: "form", verb: "speak", before: "Today people", after: "English all over the world.",
-    answer: "speak", dummies: ["are spoken", "speaks"],
+    answer: "speak", dummies: ["are spoken", "speaks", "is spoken", "speaking"],
     trans: "今では人々は世界中で英語を話す。",
     note: "主語の people（人々）が英語を話すので能動態。Today（今では）があるので現在の文。people は複数なので、s をつけない speak を使う。\nspeaks は主語が he / she などの3人称単数のときの形。are spoken は「話される」という受動態。" },
   { src: "1 ⑵ b", type: "form", verb: "speak", before: "Today English", after: "all over the world.",
-    answer: "is spoken", dummies: ["speaks", "is speaking"],
+    answer: "is spoken", dummies: ["speaks", "is speaking", "is spoke", "are spoken"],
     trans: "今では英語は世界中で話される。",
     note: "主語の English（英語）は「話される」側なので受動態〈be動詞＋過去分詞〉。現在の文で English は単数なので、be動詞は is。speak の過去分詞は spoken（speak – spoke – spoken）。\nis speaking は「話している」という進行形なので、意味が合わない。" },
   { src: "1 ⑶ a", type: "form", verb: "not invite", before: "She", after: "Tom to the party last night.",
-    answer: "did not invite", dummies: ["was not invited", "did not invited"],
+    answer: "did not invite", dummies: ["was not invited", "did not invited", "was not invite", "does not invite"],
     trans: "彼女は昨晩トムをパーティーに招かなかった。",
     note: "主語の She（彼女）がトムを招待する側なので能動態。last night（昨晩）があるので過去の否定文。一般動詞の過去の否定文は〈did not＋動詞の原形〉。\ndid not のあとは必ず原形なので、did not invited は誤り。" },
   { src: "1 ⑶ b", type: "form", verb: "not invite", before: "Tom", after: "to the party last night.",
-    answer: "was not invited", dummies: ["did not invite", "was not invite"],
+    answer: "was not invited", dummies: ["did not invite", "was not invite", "did not invited", "is not invited"],
     trans: "昨晩トムはパーティーに招かれなかった。",
     note: "主語の Tom は招待される側なので受動態。受動態の否定文は、be動詞のあとに not を置いて〈be動詞＋not＋過去分詞〉にする。過去の文なので was not invited。\nwas not のあとは過去分詞が来るので、was not invite は誤り。" },
   { src: "1 ⑷ a", type: "form", verb: "will hold", before: "They", after: "the festival next weekend.",
-    answer: "will hold", dummies: ["will be held", "will held"],
+    answer: "will hold", dummies: ["will be held", "will held", "will holds", "will be hold"],
     trans: "彼らは来週末，祭りを開催するだろう。",
     note: "hold には「（イベントなど）を開く、開催する」という意味がある。主語の They（彼ら）が祭りを開く側なので能動態。next weekend（来週末）なので未来の文。〈will＋動詞の原形〉で表す。\nwill のあとは原形なので、will held は誤り。" },
   { src: "1 ⑷ b", type: "form", verb: "will hold", before: "The festival", after: "next weekend.",
-    answer: "will be held", dummies: ["will hold", "will be hold"],
+    answer: "will be held", dummies: ["will hold", "will be hold", "will be holding", "will being held"],
     trans: "来週末，祭りが開催されるだろう。",
     note: "主語の The festival（祭り）は開催される側なので受動態。未来の受動態は〈will be＋過去分詞〉。will のあとの be動詞は原形 be になる。hold の過去分詞は held（hold – held – held）。\nwill be hold は、be のあとが原形になっているので誤り。" },
 
@@ -113,39 +116,39 @@ const QUESTIONS = [
   // ---- 5 ----（verb: true の空欄は語群から選択）
   { src: "5 ⑴", type: "blanks", ja: "昨夜，金庫から何が盗まれたのですか。",
     template: "{} {} {} from the safe last night?",
-    blanks: [ { answer: "what", dummies: ["who", "how"] },
-              { answer: "was", dummies: ["did", "is"] },
+    blanks: [ { answer: "what", dummies: ["who", "how", "where", "when"] },
+              { answer: "was", dummies: ["did", "is", "were", "does"] },
               { answer: "stolen", verb: true } ],
     note: "「何が盗まれたか」の「何が」は文の主語。疑問詞 what が主語のときは、What のあとにそのまま〈be動詞＋過去分詞〉を続ける。\n過去の文なので was。steal の過去分詞は stolen（steal – stole – stolen）。" },
   { src: "5 ⑵", type: "blanks", ja: "この植物はどのようにして日本に持ち込まれたのですか。",
     template: "{} {} this plant {} into Japan?",
-    blanks: [ { answer: "how", dummies: ["what", "why"] },
-              { answer: "was", dummies: ["did", "is"] },
+    blanks: [ { answer: "how", dummies: ["what", "why", "where", "when"] },
+              { answer: "was", dummies: ["did", "is", "were", "does"] },
               { answer: "brought", verb: true } ],
     note: "「どのようにして」は how。How のあとに受動態の疑問文〈be動詞＋主語＋過去分詞〉を続ける。\n過去の文なので was。bring の過去分詞は brought（bring – brought – brought）。" },
   { src: "5 ⑶", type: "blanks", ja: "それらの美しいグラスはどこで作られているのですか。",
     template: "{} {} those beautiful glasses {}?",
-    blanks: [ { answer: "where", dummies: ["when", "what"] },
-              { answer: "are", dummies: ["is", "do"] },
+    blanks: [ { answer: "where", dummies: ["when", "what", "why", "how"] },
+              { answer: "are", dummies: ["is", "do", "was", "does"] },
               { answer: "made", verb: true } ],
     note: "「どこで」は where。Where のあとに受動態の疑問文〈be動詞＋主語＋過去分詞〉を続ける。\n主語 those beautiful glasses は複数で現在の文なので、be動詞は are。make の過去分詞は made（make – made – made）。" },
   { src: "5 ⑷", type: "blanks", ja: "この写真はいつ撮られたのですか。",
     template: "{} {} this photo {}?",
-    blanks: [ { answer: "when", dummies: ["where", "what"] },
-              { answer: "was", dummies: ["did", "were"] },
+    blanks: [ { answer: "when", dummies: ["where", "what", "why", "how"] },
+              { answer: "was", dummies: ["did", "were", "is", "does"] },
               { answer: "taken", verb: true } ],
     note: "「いつ」は when。When のあとに受動態の疑問文〈be動詞＋主語＋過去分詞〉を続ける。\n過去の文なので was。写真を「撮る」は take で、過去分詞は taken（take – took – taken）。" },
   { src: "5 ⑸", type: "blanks", ja: "その書類には，だれの名前が印刷されていますか。",
     template: "{} name {} {} on the contract?",
-    blanks: [ { answer: "whose", dummies: ["who", "what"] },
-              { answer: "is", dummies: ["are", "does"] },
+    blanks: [ { answer: "whose", dummies: ["who", "what", "whom", "how"] },
+              { answer: "is", dummies: ["are", "does", "do", "were"] },
               { answer: "printed", verb: true } ],
     note: "「だれの名前が」は whose name でひとまとまり。これが文の主語なので、そのあとに〈be動詞＋過去分詞〉をそのまま続ける。\nname は単数で現在の文なので is。print の過去分詞は printed。" },
   { src: "5 ⑹", type: "blanks", ja: "ラジウムはだれによって発見されたのですか。",
     template: "Who {} radium {} {}?",
-    blanks: [ { answer: "was", dummies: ["did", "is"] },
+    blanks: [ { answer: "was", dummies: ["did", "is", "were", "does"] },
               { answer: "discovered", verb: true },
-              { answer: "by", dummies: ["from", "with"] } ],
+              { answer: "by", dummies: ["from", "with", "for", "of"] } ],
     note: "「だれによって～されたか」は、Who のあとに受動態の疑問文を続け、最後に by を置いて Who ～ by? の形にする。\n過去の文なので was radium discovered。discover（発見する）の過去分詞は discovered。最後の by を忘れないこと。" },
 
   // ---- 6 ----
@@ -258,6 +261,9 @@ function shuffle(arr) {
   return a;
 }
 
+// ダミー候補から DUMMY_COUNT 個をランダムに選ぶ
+function pickDummies(list) { return shuffle(list).slice(0, DUMMY_COUNT); }
+
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
 function esc(s) {
@@ -354,7 +360,7 @@ function renderQuestion() {
   if (q.ja) html += `<p class="ja">${esc(q.ja)}</p>`;
 
   if (q.type === "form") {
-    if (!rec.options) rec.options = shuffle([q.answer, ...q.dummies]);
+    if (!rec.options) rec.options = shuffle([q.answer, ...pickDummies(q.dummies)]);
     const fills = rec.choice === undefined ? null : rec.options[rec.choice];
     const atStart = q.template.startsWith("{}");
     let i = 0;
@@ -371,7 +377,7 @@ function renderQuestion() {
 
   if (q.type === "blanks") {
     if (!rec.sels) rec.sels = q.blanks.map(() => "");
-    if (!rec.opts) rec.opts = q.blanks.map(b => b.verb ? VERB_CHOICES : shuffle([b.answer, ...b.dummies]));
+    if (!rec.opts) rec.opts = q.blanks.map(b => b.verb ? VERB_CHOICES : shuffle([b.answer, ...pickDummies(b.dummies)]));
     const atStart = q.template.startsWith("{}");
     let i = 0;
     const body = esc(q.template).replace(/\{\}/g, () => {
